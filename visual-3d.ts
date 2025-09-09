@@ -12,7 +12,6 @@ import {customElement, property} from 'lit/decorators.js';
 import {Analyser} from './analyser';
 
 import * as THREE from 'three';
-import {EXRLoader} from 'three/addons/loaders/EXRLoader.js';
 import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
 import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
 import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
@@ -31,18 +30,9 @@ export class GdmLiveAudioVisuals3D extends LitElement {
   private camera!: THREE.PerspectiveCamera;
   private backdrop!: THREE.Mesh;
   private composer!: EffectComposer;
-  private mesh!: THREE.Mesh;
+  private knot!: THREE.Mesh;
   private prevTime = 0;
   private rotation = new THREE.Vector3(0, 0, 0);
-
-  // Video processing properties
-  private videoCanvas!: HTMLCanvasElement;
-  private videoCanvasCtx!: CanvasRenderingContext2D;
-  private lastVideoFrame!: ImageData;
-  private motion = 0;
-  private avgColor = new THREE.Vector3();
-
-  @property({attribute: false}) videoElement: HTMLVideoElement | null = null;
 
   private _outputNode!: AudioNode;
 
@@ -80,75 +70,8 @@ export class GdmLiveAudioVisuals3D extends LitElement {
     }
   `;
 
-  protected updated(changedProperties: Map<string | number | symbol, unknown>) {
-    if (changedProperties.has('videoElement') && this.videoElement) {
-      this.setupVideoProcessing();
-    }
-  }
-
-  private setupVideoProcessing() {
-    if (!this.videoElement) return;
-    this.videoCanvas = document.createElement('canvas');
-    this.videoCanvas.width = 64; // Small canvas for performance
-    this.videoCanvas.height = 48;
-    this.videoCanvasCtx = this.videoCanvas.getContext('2d', {
-      willReadFrequently: true,
-    })!;
-  }
-
-  private processVideoFrame() {
-    // Draw video to canvas
-    this.videoCanvasCtx.drawImage(
-      this.videoElement!,
-      0,
-      0,
-      this.videoCanvas.width,
-      this.videoCanvas.height,
-    );
-    const frameData = this.videoCanvasCtx.getImageData(
-      0,
-      0,
-      this.videoCanvas.width,
-      this.videoCanvas.height,
-    );
-    const pixels = frameData.data;
-
-    if (!this.lastVideoFrame) {
-      // Store first frame
-      this.lastVideoFrame = frameData;
-      return;
-    }
-
-    let motion = 0;
-    let r = 0,
-      g = 0,
-      b = 0;
-    const numPixels = pixels.length / 4;
-
-    for (let i = 0; i < pixels.length; i += 4) {
-      // Calculate average color
-      r += pixels[i];
-      g += pixels[i + 1];
-      b += pixels[i + 2];
-
-      // Calculate motion (simple frame differencing)
-      const diff =
-        Math.abs(pixels[i] - this.lastVideoFrame.data[i]) +
-        Math.abs(pixels[i + 1] - this.lastVideoFrame.data[i + 1]) +
-        Math.abs(pixels[i + 2] - this.lastVideoFrame.data[i + 2]);
-      motion += diff;
-    }
-
-    // Normalize values
-    this.avgColor.set(
-      r / numPixels / 255,
-      g / numPixels / 255,
-      b / numPixels / 255,
-    );
-    this.motion = motion / (numPixels * 3 * 255); // Normalize motion to be roughly in [0, 1]
-
-    // Store current frame for next comparison
-    this.lastVideoFrame = frameData;
+  connectedCallback() {
+    super.connectedCallback();
   }
 
   private init() {
@@ -182,47 +105,35 @@ export class GdmLiveAudioVisuals3D extends LitElement {
 
     const renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: !true,
+      antialias: false,
     });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio / 1);
+    renderer.setPixelRatio(window.devicePixelRatio);
 
-    const geometry = new THREE.DodecahedronGeometry(1.5, 2);
+    const geometry = new THREE.TorusKnotGeometry(1, 0.3, 200, 32);
 
-    new EXRLoader().load('piz_compressed.exr', (texture: THREE.Texture) => {
-      texture.mapping = THREE.EquirectangularReflectionMapping;
-      const exrCubeRenderTarget = pmremGenerator.fromEquirectangular(texture);
-      meshMaterial.envMap = exrCubeRenderTarget.texture;
-      mesh.visible = true;
-    });
-
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    pmremGenerator.compileEquirectangularShader();
-
-    const meshMaterial = new THREE.MeshStandardMaterial({
-      color: 0x2222ff,
-      metalness: 0.8,
-      roughness: 0.2,
+    const knotMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4f4fef,
+      metalness: 0.1,
+      roughness: 0.5,
       emissive: 0x111133,
       emissiveIntensity: 2.0,
     });
 
-    meshMaterial.onBeforeCompile = (shader) => {
+    knotMaterial.onBeforeCompile = (shader) => {
       shader.uniforms.time = {value: 0};
       shader.uniforms.inputData = {value: new THREE.Vector4()};
       shader.uniforms.outputData = {value: new THREE.Vector4()};
-      shader.uniforms.cameraData = {value: new THREE.Vector4()};
 
-      meshMaterial.userData.shader = shader;
+      knotMaterial.userData.shader = shader;
 
       shader.vertexShader = sphereVS;
     };
 
-    const mesh = new THREE.Mesh(geometry, meshMaterial);
-    scene.add(mesh);
-    mesh.visible = false;
+    const knot = new THREE.Mesh(geometry, knotMaterial);
+    scene.add(knot);
 
-    this.mesh = mesh;
+    this.knot = knot;
 
     const renderPass = new RenderPass(scene, camera);
 
@@ -269,23 +180,16 @@ export class GdmLiveAudioVisuals3D extends LitElement {
     this.inputAnalyser.update();
     this.outputAnalyser.update();
 
-    if (
-      this.videoElement &&
-      this.videoElement.readyState >= this.videoElement.HAVE_CURRENT_DATA
-    ) {
-      this.processVideoFrame();
-    }
-
     const t = performance.now();
     const dt = (t - this.prevTime) / (1000 / 60);
     this.prevTime = t;
     const backdropMaterial = this.backdrop.material as THREE.RawShaderMaterial;
-    const meshMaterial = this.mesh.material as THREE.MeshStandardMaterial;
+    const knotMaterial = this.knot.material as THREE.MeshStandardMaterial;
 
     backdropMaterial.uniforms.rand.value = Math.random() * 10000;
 
-    if (meshMaterial.userData.shader) {
-      this.mesh.scale.setScalar(
+    if (knotMaterial.userData.shader) {
+      this.knot.scale.setScalar(
         1 + (0.2 * this.outputAnalyser.data[1]) / 255,
       );
 
@@ -304,27 +208,21 @@ export class GdmLiveAudioVisuals3D extends LitElement {
       const vector = new THREE.Vector3(0, 0, 5);
       vector.applyQuaternion(quaternion);
       this.camera.position.copy(vector);
-      this.camera.lookAt(this.mesh.position);
+      this.camera.lookAt(this.knot.position);
 
-      meshMaterial.userData.shader.uniforms.time.value +=
+      knotMaterial.userData.shader.uniforms.time.value +=
         (dt * 0.1 * this.outputAnalyser.data[0]) / 255;
-      meshMaterial.userData.shader.uniforms.inputData.value.set(
+      knotMaterial.userData.shader.uniforms.inputData.value.set(
         (1 * this.inputAnalyser.data[0]) / 255,
         (0.1 * this.inputAnalyser.data[1]) / 255,
         (10 * this.inputAnalyser.data[2]) / 255,
         0,
       );
-      meshMaterial.userData.shader.uniforms.outputData.value.set(
+      knotMaterial.userData.shader.uniforms.outputData.value.set(
         (2 * this.outputAnalyser.data[0]) / 255,
         (0.1 * this.outputAnalyser.data[1]) / 255,
         (10 * this.outputAnalyser.data[2]) / 255,
         0,
-      );
-      meshMaterial.userData.shader.uniforms.cameraData.value.set(
-        this.motion,
-        this.avgColor.x,
-        this.avgColor.y,
-        this.avgColor.z,
       );
     }
 

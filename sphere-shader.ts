@@ -23,14 +23,12 @@ varying vec3 vViewPosition;
 uniform float time;
 uniform vec4 inputData;
 uniform vec4 outputData;
-uniform vec4 cameraData;
 
 // Function to displace a vertex along its normal
 vec3 displace(vec3 pos, vec3 norm) {
   float displacement = 
-    0.3 * inputData.x * (.5 + .5 * sin(pos.y * inputData.z + time)) +
-    0.3 * outputData.x * (.5 + .5 * sin(pos.x * outputData.z + time)) +
-    0.5 * cameraData.x * (.5 + .5 * sin(pos.z * 20.0 * (cameraData.y + 0.1) + time));
+    0.4 * inputData.x * (.5 + .5 * sin(pos.y * inputData.z + time)) +
+    0.4 * outputData.x * (.5 + .5 * sin(pos.x * outputData.z + time));
   return pos + norm * displacement;
 }
 

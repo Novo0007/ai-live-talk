@@ -15,7 +15,6 @@ export class GdmLiveAudio extends LitElement {
   @state() isRecording = false;
   @state() status = '';
   @state() error = '';
-  @state() videoElement: HTMLVideoElement | null = null;
 
   private client: GoogleGenAI;
   private session: Session;
@@ -91,7 +90,7 @@ export class GdmLiveAudio extends LitElement {
     this.initAudio();
 
     this.client = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey: process.env.API_KEY,
     });
 
     this.outputNode.connect(this.outputAudioContext.destination);
@@ -181,32 +180,15 @@ export class GdmLiveAudio extends LitElement {
 
     this.inputAudioContext.resume();
 
-    this.updateStatus('Requesting microphone and camera access...');
+    this.updateStatus('Requesting microphone access...');
 
     try {
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: true,
+        video: false,
       });
 
-      this.updateStatus('Microphone and camera access granted. Starting capture...');
-
-      // Video setup
-      this.videoElement = document.createElement('video');
-      this.videoElement.srcObject = this.mediaStream;
-      this.videoElement.style.position = 'absolute';
-      this.videoElement.style.top = '10px';
-      this.videoElement.style.left = '10px';
-      this.videoElement.style.width = '160px';
-      this.videoElement.style.height = '120px';
-      this.videoElement.style.border = '2px solid rgba(255,255,255,0.2)';
-      this.videoElement.style.borderRadius = '8px';
-      this.videoElement.style.objectFit = 'cover';
-      this.videoElement.style.zIndex = '20';
-      this.videoElement.muted = true; // Mute to avoid feedback
-      this.shadowRoot!.appendChild(this.videoElement);
-      this.videoElement.play();
-
+      this.updateStatus('Microphone access granted. Starting capture...');
 
       this.sourceNode = this.inputAudioContext.createMediaStreamSource(
         this.mediaStream,
@@ -233,7 +215,7 @@ export class GdmLiveAudio extends LitElement {
       this.scriptProcessorNode.connect(this.inputAudioContext.destination);
 
       this.isRecording = true;
-      this.updateStatus('🔴 Recording... Capturing audio and video.');
+      this.updateStatus('🔴 Recording... Capturing PCM chunks.');
     } catch (err) {
       console.error('Error starting recording:', err);
       this.updateStatus(`Error: ${err.message}`);
@@ -260,12 +242,6 @@ export class GdmLiveAudio extends LitElement {
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach((track) => track.stop());
       this.mediaStream = null;
-    }
-    
-    if (this.videoElement) {
-      this.videoElement.srcObject = null;
-      this.videoElement.remove();
-      this.videoElement = null;
     }
 
     this.updateStatus('Recording stopped. Click Start to begin again.');
@@ -326,8 +302,7 @@ export class GdmLiveAudio extends LitElement {
         <div id="status"> ${this.error} </div>
         <gdm-live-audio-visuals-3d
           .inputNode=${this.inputNode}
-          .outputNode=${this.outputNode}
-          .videoElement=${this.videoElement}></gdm-live-audio-visuals-3d>
+          .outputNode=${this.outputNode}></gdm-live-audio-visuals-3d>
       </div>
     `;
   }
